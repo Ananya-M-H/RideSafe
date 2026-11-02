@@ -8,12 +8,18 @@ counts as "pothole" if its pothole mask has any annotated pixels, and
 "no_pothole" otherwise (the image may still show a crack, just no pothole).
 
 Usage:
+    # Local dataset (recommended if you already downloaded it):
+    python scripts/prepare_dataset.py --source "C:/path/to/Dataset"
+    python scripts/prepare_dataset.py --source ./Dataset
+
+    # Or clone from GitHub automatically (old behaviour):
     python scripts/prepare_dataset.py
 """
 import argparse
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -33,6 +39,39 @@ def clone_source(tmp_dir: Path) -> Path:
         check=True,
     )
     return dataset_dir
+
+
+def resolve_local_source(source: Path) -> Path:
+    """Accept either repo root, Dataset/, or folder containing SampleXX dirs."""
+    source = source.expanduser().resolve()
+    if not source.exists():
+        sys.exit(f"ERROR: --source not found: {source}")
+
+    # Case 1: user passed repo root containing Dataset/
+    if (source / "Dataset").is_dir():
+        return source / "Dataset"
+
+    # Case 2: user passed Dataset/ directly
+    # Heuristic: contains subfolders with *_RAW.jpg
+    sample_dirs = [p for p in source.iterdir() if p.is_dir()]
+    has_samples = any(
+        next(d.glob("*_RAW.jpg"), None) for d in sample_dirs
+    )
+    if has_samples:
+        return source
+
+    # Case 3: user passed one Sample folder by mistake
+    if next(source.glob("*_RAW.jpg"), None):
+        sys.exit(
+            f"ERROR: --source looks like a single sample: {source}\n"
+            f"Pass the parent Dataset/ folder instead."
+        )
+
+    sys.exit(
+        f"ERROR: no samples found in --source: {source}\n"
+        f"Expected it to contain SampleXX folders with *_RAW.jpg + *_POTHOLE.png,\n"
+        f"or to be the repo root containing Dataset/."
+    )
 
 
 def label_from_mask(mask_path: Path) -> int:
@@ -76,6 +115,12 @@ def main() -> None:
         "--out", default="data", help="output directory (default: data/)"
     )
     parser.add_argument(
+        "--source",
+        default=None,
+        help="local path to Dataset/ folder (or repo root containing Dataset/). "
+             "If omitted, clones from GitHub.",
+    )
+    parser.add_argument(
         "--keep-source",
         action="store_true",
         help="keep the cloned source repo instead of deleting it after use",
@@ -87,12 +132,17 @@ def main() -> None:
         print(f"{out_dir} already looks populated, skipping. Delete it to rebuild.")
         sys.exit(0)
 
-    tmp_dir = Path("/tmp/cnn_street_source")
-    dataset_dir = clone_source(tmp_dir)
-    build_dataset(dataset_dir, out_dir)
+    if args.source:
+        dataset_dir = resolve_local_source(Path(args.source))
+        print(f"Using local dataset: {dataset_dir}")
+        build_dataset(dataset_dir, out_dir)
+    else:
+        tmp_dir = Path(tempfile.gettempdir()) / "cnn_street_source"
+        dataset_dir = clone_source(tmp_dir)
+        build_dataset(dataset_dir, out_dir)
 
-    if not args.keep_source:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+        if not args.keep_source:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
