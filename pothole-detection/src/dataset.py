@@ -9,7 +9,7 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 
 CLASSES = ["no_pothole", "pothole"]
-IMAGE_SIZE = 128
+IMAGE_SIZE = 160
 SEED = 42
 
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
@@ -17,10 +17,11 @@ IMAGENET_STD = [0.229, 0.224, 0.225]
 
 train_transform = transforms.Compose(
     [
-        transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
+        transforms.Resize((IMAGE_SIZE + 16, IMAGE_SIZE + 16)),
+        transforms.RandomCrop(IMAGE_SIZE),
         transforms.RandomHorizontalFlip(),
-        transforms.RandomRotation(10),
-        transforms.ColorJitter(brightness=0.2, contrast=0.2),
+        transforms.RandomRotation(7),
+        transforms.ColorJitter(brightness=0.15, contrast=0.15),
         transforms.ToTensor(),
         transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
     ]
@@ -86,5 +87,5 @@ def make_splits(data_dir: Path, val_size: float = 0.15, test_size: float = 0.15)
 
 def class_weights(labels: List[int]) -> torch.Tensor:
     counts = torch.bincount(torch.tensor(labels), minlength=len(CLASSES)).float()
-    weights = counts.sum() / (len(CLASSES) * counts)
+    weights = (counts.sum() / (len(CLASSES) * counts)).sqrt()
     return weights

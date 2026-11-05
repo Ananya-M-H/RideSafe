@@ -12,9 +12,10 @@ from torch.utils.data import DataLoader
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from sklearn.metrics import precision_recall_curve
 
 from dataset import SEED, class_weights, make_splits
-from model import PotholeCNN
+from model import PotholeCNN, load_checkpoint
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -55,13 +56,29 @@ def run_epoch(model, loader, criterion, optimizer, device, train: bool):
     return total_loss / total, correct / total
 
 
+def select_f1_threshold(model, loader, device) -> float:
+    model.eval()
+    labels, probabilities = [], []
+    with torch.no_grad():
+        for images, batch_labels in loader:
+            outputs = model(images.to(device))
+            probabilities.extend(torch.softmax(outputs, dim=1)[:, 1].cpu().tolist())
+            labels.extend(batch_labels.tolist())
+
+    precision, recall, thresholds = precision_recall_curve(labels, probabilities)
+    if thresholds.size == 0:
+        return 0.5
+    f1 = 2 * precision[:-1] * recall[:-1] / (precision[:-1] + recall[:-1] + 1e-12)
+    return float(thresholds[int(np.argmax(f1))])
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", default=str(ROOT / "data"))
-    parser.add_argument("--epochs", type=int, default=25)
+    parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--patience", type=int, default=6)
+    parser.add_argument("--lr", type=float, default=3e-4)
+    parser.add_argument("--patience", type=int, default=10)
     args = parser.parse_args()
 
     set_seed()
@@ -78,7 +95,7 @@ def main() -> None:
     criterion = nn.CrossEntropyLoss(weight=weights)
 
     model = PotholeCNN().to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-3)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=2)
 
     history = {"train_loss": [], "val_loss": [], "train_acc": [], "val_acc": []}
@@ -109,12 +126,24 @@ def main() -> None:
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             epochs_no_improve = 0
-            torch.save(model.state_dict(), models_dir / "best_model.pt")
+            torch.save(
+                {"model_state_dict": model.state_dict(), "decision_threshold": 0.5},
+                models_dir / "best_model.pt",
+            )
         else:
             epochs_no_improve += 1
             if epochs_no_improve >= args.patience:
                 print(f"Early stopping at epoch {epoch} (no val improvement for {args.patience} epochs).")
                 break
+
+    checkpoint_path = models_dir / "best_model.pt"
+    load_checkpoint(model, checkpoint_path, device)
+    threshold = select_f1_threshold(model, val_loader, device)
+    torch.save(
+        {"model_state_dict": model.state_dict(), "decision_threshold": threshold},
+        checkpoint_path,
+    )
+    print(f"Validation-selected F1 threshold: {threshold:.3f}")
 
     with open(results_dir / "history.json", "w") as f:
         json.dump(history, f, indent=2)

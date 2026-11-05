@@ -23,7 +23,7 @@ pavement cracks, not just clean road.
 Diagnostic Vehicle for Brazil's National Department of Transport Infrastructure
 (DNIT), each shipped with a pixel-level pothole annotation mask. MIT licensed.
 
-`scripts/prepare_dataset.py` derives the binary classification label for each
+`scripts/prepare-dataset.py` derives the binary classification label for each
 image directly from its mask (pothole present / not present) and sorts the
 images into `data/pothole/` and `data/no_pothole/`:
 
@@ -32,86 +32,134 @@ images into `data/pothole/` and `data/no_pothole/`:
 | pothole | 564 |
 | no_pothole (incl. crack-only roads) | 1,671 |
 
-The raw dataset isn't committed to this repo (it's regenerated on demand); run
-the script below to fetch it.
+The raw dataset isn't committed to this repo. The preparation script accepts
+either a local copy of the dataset or downloads it automatically.
 
 ```bash
-python scripts/prepare_dataset.py
+# Use a local dataset copy (the folder should contain SampleXX folders)
+python scripts/prepare-dataset.py --source "D:\v1"
+
+# Or download the public dataset automatically
+python scripts/prepare-dataset.py
 ```
 
 ## Model
 
-A compact CNN built from scratch (no pretrained backbone):
+A residual CNN trained entirely from scratch (no pretrained weights):
 
 ```
-4 x [Conv3x3 -> BatchNorm -> ReLU -> MaxPool]  (3->32->64->128->128 channels)
-Global Average Pooling
-Dropout(0.3) -> Linear(128 -> 2)
+Residual convolutional stages (3->32->64->128 channels)
+Global Average Pooling -> Dropout -> small classifier
 ```
 
-Input images are resized to 128x128 and normalized with ImageNet statistics.
-Training uses class-weighted cross-entropy (to counter the 1:3 pothole /
-no-pothole imbalance), Adam, and a ReduceLROnPlateau schedule, with early
-stopping on validation loss. See [src/model.py](src/model.py) and
-[src/train.py](src/train.py).
+Input images are resized to 160x160 and normalized with ImageNet statistics.
+Training uses moderately class-weighted cross-entropy, AdamW, augmentation, and
+early stopping on validation loss. A pothole threshold is selected on the
+validation split to maximize F1; the test split remains reserved for evaluation.
+See [src/model.py](src/model.py) and [src/train.py](src/train.py).
 
 Data is split 70 / 15 / 15 (train / val / test), stratified by class, with a
 fixed random seed for reproducibility.
 
 ## Results
 
-Evaluated on a held-out test set of 336 images never seen during training:
+The current scratch-CNN checkpoint scored the following on a held-out test set
+of 336 images:
 
 | metric | value |
 |---|---|
-| Accuracy | 0.744 |
-| Precision | 0.496 |
-| Recall | 0.753 |
-| F1 | 0.598 |
-| ROC-AUC | 0.835 |
+| Decision threshold | 0.301 |
+| Accuracy | 0.821 |
+| Precision | 0.634 |
+| Recall | 0.694 |
+| F1 | 0.663 |
+| ROC-AUC | 0.842 |
 
 ![Training curves](results/training_curves.png)
 ![Confusion matrix](results/confusion_matrix.png)
 
-Precision is modest at the default threshold — the model, biased by class
-weighting toward catching potholes, produces a meaningful number of false
-positives on crack-only road segments. The ROC-AUC of 0.84 indicates good
-underlying separability between the two classes; a stricter decision threshold
-would trade recall for precision depending on the deployment goal (e.g. city
-maintenance crews likely prefer higher recall to avoid missing real potholes).
+The decision threshold was selected on the validation split to maximize F1;
+the test split was held out for final evaluation. Results may vary with a
+different dataset or split. Running `python src/evaluate.py` updates
+`results/metrics.json` and the confusion matrix; update this table manually if
+you want the README to reflect a newly trained checkpoint's metrics.
 
 ## Project structure
 
 ```
-CNN STREET/
-├── scripts/prepare_dataset.py   # builds data/ from the public source dataset
+pothole-detection/
+├── data/                         # generated dataset; not committed
+│   ├── no_pothole/               # road images without potholes
+│   └── pothole/                  # road images containing potholes
+├── models/
+│   └── best_model.pt             # best checkpoint from training
+├── results/
+│   ├── confusion_matrix.png      # test-set confusion matrix
+│   ├── history.json              # per-epoch training and validation history
+│   ├── metrics.json              # latest test-set metrics
+│   └── training_curves.png       # loss and accuracy curves
+├── scripts/
+│   └── prepare-dataset.py        # prepares labeled image folders from source data
 ├── src/
-│   ├── dataset.py                # dataset loading, transforms, stratified split
-│   ├── model.py                  # PotholeCNN architecture
-│   ├── train.py                  # training loop + checkpointing + curves
-│   ├── evaluate.py                # test-set metrics + confusion matrix
-│   └── predict.py                 # run inference on a single image
-├── models/best_model.pt          # trained weights (best val loss)
-└── results/                       # training curves, confusion matrix, metrics.json
+│   ├── dataset.py                # loading, transforms, and stratified data split
+│   ├── model.py                  # scratch-trained residual CNN
+│   ├── train.py                  # training, checkpointing, and threshold selection
+│   ├── evaluate.py               # held-out test metrics and confusion matrix
+│   └── predict.py                # inference on one road image
+├── requirements.txt              # Python dependencies
+└── README.md
 ```
 
 ## Usage
 
-```bash
-pip install -r requirements.txt
+### Run on Windows (PowerShell)
 
-# 1. build the dataset
-python scripts/prepare_dataset.py
+Open PowerShell and change to the project folder:
 
-# 2. train
-python src/train.py --epochs 30
-
-# 3. evaluate on the test split
-python src/evaluate.py
-
-# 4. classify a single image
-python src/predict.py path/to/photo.jpg
+```powershell
+cd D:\RideSafe\pothole-detection
 ```
+
+Create and activate a virtual environment, then install dependencies:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+If PowerShell blocks activation, allow it for the current terminal session and
+activate again:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
+```
+
+Prepare the dataset. If your dataset is already at `D:\v1`, use that path;
+otherwise omit `--source` to download it:
+
+```powershell
+python scripts\prepare-dataset.py --source "D:\v1"
+# Or download the dataset:
+python scripts\prepare-dataset.py
+```
+
+Train the scratch CNN, evaluate it on the held-out test split, and predict from
+an original road photo (the `*_RAW` image, not a lane/crack/pothole annotation):
+
+```powershell
+python src\train.py --epochs 50
+python src\evaluate.py
+python src\predict.py "D:\v1\SampleXX\image_RAW.jpg"
+```
+
+Training saves the best validation-loss checkpoint to
+`models\best_model.pt`, selects a decision threshold using only validation data,
+and writes the training history and curves under `results\`. Evaluation writes
+the test metrics and confusion matrix there. The first run of training can take
+a while, especially on CPU.
 
 ## Citation
 

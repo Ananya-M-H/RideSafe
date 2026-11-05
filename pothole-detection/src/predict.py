@@ -9,7 +9,7 @@ from pathlib import Path
 import torch
 
 from dataset import CLASSES, eval_transform
-from model import PotholeCNN
+from model import PotholeCNN, load_checkpoint
 from train import get_device
 from PIL import Image
 
@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 def predict(image_path: str, checkpoint: str) -> None:
     device = get_device()
     model = PotholeCNN().to(device)
-    model.load_state_dict(torch.load(checkpoint, map_location=device))
+    threshold = load_checkpoint(model, checkpoint, device)
     model.eval()
 
     image = Image.open(image_path).convert("RGB")
@@ -28,8 +28,11 @@ def predict(image_path: str, checkpoint: str) -> None:
     with torch.no_grad():
         probs = torch.softmax(model(tensor), dim=1)[0]
 
-    pred_idx = probs.argmax().item()
-    print(f"Prediction: {CLASSES[pred_idx]} (confidence={probs[pred_idx]:.3f})")
+    pred_idx = int(probs[1] >= threshold)
+    print(
+        f"Prediction: {CLASSES[pred_idx]} "
+        f"(confidence={probs[pred_idx]:.3f}, threshold={threshold:.3f})"
+    )
     for cls, p in zip(CLASSES, probs.tolist()):
         print(f"  {cls}: {p:.3f}")
 

@@ -16,7 +16,7 @@ from sklearn.metrics import (
 from torch.utils.data import DataLoader
 
 from dataset import CLASSES, make_splits
-from model import PotholeCNN
+from model import PotholeCNN, load_checkpoint
 from train import get_device, set_seed
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -36,7 +36,7 @@ def main() -> None:
     test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False)
 
     model = PotholeCNN().to(device)
-    model.load_state_dict(torch.load(args.checkpoint, map_location=device))
+    threshold = load_checkpoint(model, args.checkpoint, device)
     model.eval()
 
     all_labels, all_preds, all_probs = [], [], []
@@ -45,7 +45,7 @@ def main() -> None:
             images = images.to(device)
             outputs = model(images)
             probs = torch.softmax(outputs, dim=1)[:, 1]
-            preds = outputs.argmax(1).cpu()
+            preds = (probs >= threshold).cpu().long()
             all_labels.extend(labels.tolist())
             all_preds.extend(preds.tolist())
             all_probs.extend(probs.cpu().tolist())
@@ -58,6 +58,7 @@ def main() -> None:
 
     metrics = {
         "n_test": len(all_labels),
+        "decision_threshold": threshold,
         "accuracy": accuracy,
         "precision": precision,
         "recall": recall,

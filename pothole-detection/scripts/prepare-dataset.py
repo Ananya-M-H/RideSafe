@@ -9,11 +9,11 @@ counts as "pothole" if its pothole mask has any annotated pixels, and
 
 Usage:
     # Local dataset (recommended if you already downloaded it):
-    python scripts/prepare_dataset.py --source "C:/path/to/Dataset"
-    python scripts/prepare_dataset.py --source ./Dataset
+    python scripts/prepare-dataset.py --source "C:/path/to/Dataset"
+    python scripts/prepare-dataset.py --source ./Dataset
 
     # Or clone from GitHub automatically (old behaviour):
-    python scripts/prepare_dataset.py
+    python scripts/prepare-dataset.py
 """
 import argparse
 import shutil
@@ -51,17 +51,17 @@ def resolve_local_source(source: Path) -> Path:
     if (source / "Dataset").is_dir():
         return source / "Dataset"
 
-    # Case 2: user passed Dataset/ directly
-    # Heuristic: contains subfolders with *_RAW.jpg
+    # Case 2: user passed Dataset/ directly (e.g. D:\v1)
+    # Heuristic: contains subfolders with *_RAW.* files (any ext, any case)
     sample_dirs = [p for p in source.iterdir() if p.is_dir()]
-    has_samples = any(
-        next(d.glob("*_RAW.jpg"), None) for d in sample_dirs
-    )
+    def _has_raw(d: Path) -> bool:
+        return any("_RAW" in p.name.upper() for p in d.iterdir() if p.is_file())
+    has_samples = any(_has_raw(d) for d in sample_dirs)
     if has_samples:
         return source
 
     # Case 3: user passed one Sample folder by mistake
-    if next(source.glob("*_RAW.jpg"), None):
+    if any("_RAW" in p.name.upper() for p in source.iterdir() if p.is_file()):
         sys.exit(
             f"ERROR: --source looks like a single sample: {source}\n"
             f"Pass the parent Dataset/ folder instead."
@@ -89,8 +89,9 @@ def build_dataset(dataset_dir: Path, out_dir: Path) -> None:
     n_pothole = n_no_pothole = n_skipped = 0
 
     for i, sample_dir in enumerate(sample_dirs):
-        raw = next(sample_dir.glob("*_RAW.jpg"), None)
-        mask = next(sample_dir.glob("*_POTHOLE.png"), None)
+        files = sorted(p for p in sample_dir.iterdir() if p.is_file())
+        raw = next((p for p in files if "_RAW" in p.name.upper()), None)
+        mask = next((p for p in files if "_POTHOLE" in p.name.upper()), None)
         if raw is None or mask is None:
             n_skipped += 1
             continue
