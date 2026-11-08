@@ -167,3 +167,10 @@ If you use the underlying dataset, please cite:
 
 > Passos, B.T., Cassaniga, M.J., Fernandes, A.M.R., Medeiros, K.B., Comunello, E.
 > "Cracks and Potholes in Road Images Dataset." University of Itajaí Valley (UNIVALI), 2020.
+
+
+To open in Jupiter notebook 
+cd "D:\RideSafe\pothole-detection"
+.\.venv\Scripts\activate
+jupyter notebook
+
